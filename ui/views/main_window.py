@@ -24,7 +24,7 @@ class MainWindow(QMainWindow):
         self.qt_log_handler = qt_log_handler
         self.device = None
         
-        # --- HERE IS THE MAGIC: THE TIMER ---
+        # --- TIMER ---
         self.timer = QTimer()
         self.timer.timeout.connect(self.poll_hardware)
         
@@ -55,14 +55,25 @@ class MainWindow(QMainWindow):
         cfg_form.addWidget(QLabel("Channel:"))
         cfg_form.addWidget(self.chan_combo)
 
+        # 1. TRIGGER THRESHOLD (Corregido, solo aparece una vez)
         self.thresh_spin = QDoubleSpinBox()
-        self.thresh_spin.setRange(0, 4.0)
+        self.thresh_spin.setRange(-5.0, 5.0) # Mejor poner rango negativo por si la base baja
         self.thresh_spin.setValue(0.8)
         self.thresh_spin.setSingleStep(0.05)
         self.thresh_spin.setSuffix(" V")
         cfg_form.addWidget(QLabel("Trigger Threshold (Falling):"))
         cfg_form.addWidget(self.thresh_spin)
 
+        # 2. CONTROL DE AMPLITUD MÁXIMA PHA
+        self.pha_max_spin = QDoubleSpinBox()
+        self.pha_max_spin.setRange(0.5, 10.0) 
+        self.pha_max_spin.setValue(5.0)       
+        self.pha_max_spin.setSingleStep(0.5)
+        self.pha_max_spin.setSuffix(" V")
+        cfg_form.addWidget(QLabel("PHA Max Amplitude:"))
+        cfg_form.addWidget(self.pha_max_spin)
+
+        # 3. BOTONES DE MODO
         self.sim_btn = QPushButton("Use Simulated Hardware")
         self.sim_btn.setCheckable(True)
         cfg_form.addWidget(self.sim_btn)
@@ -109,7 +120,7 @@ class MainWindow(QMainWindow):
         # OSCILLOSCOPE
         self.wave_plot = pg.PlotWidget(title="Oscilloscope (Live Signal)")
         self.wave_plot.setLabel('left', 'Voltage', 'V')
-        self.wave_plot.setLabel('bottom', 'Samples') 
+        self.wave_plot.setLabel('bottom', 'Time', 'µs') 
         self.wave_plot.showGrid(x=True, y=True)
         self.wave_curve = self.wave_plot.plot(pen=pg.mkPen('y', width=2))
         display_layout.addWidget(self.wave_plot, 2)
@@ -134,7 +145,8 @@ class MainWindow(QMainWindow):
         self.btn_reset.clicked.connect(self.reset_data)
         self.btn_save.clicked.connect(self.save_data)
         self.view_model.stats_updated.connect(self.update_stats_ui)
-
+        self.pha_max_spin.valueChanged.connect(self.update_pha_range)
+        
     @pyqtSlot()
     def start_acquisition(self):
         if self.sim_btn.isChecked():
@@ -153,7 +165,7 @@ class MainWindow(QMainWindow):
         )
         self.sample_rate = config.sample_rate
         
-        # Configure Hardware (Starts automatically)
+        # Configure Hardware
         self.device.configure(config)
         
         # Start QTimer (Poll every 20 ms)
@@ -164,6 +176,7 @@ class MainWindow(QMainWindow):
         self.btn_stop.setEnabled(True)
         self.sim_btn.setEnabled(False)
         self.cont_mode_check.setEnabled(False)
+        self.pha_max_spin.setEnabled(False) # Bloquear cambiar el rango mientras corre
 
     @pyqtSlot()
     def stop_acquisition(self):
@@ -176,6 +189,7 @@ class MainWindow(QMainWindow):
         self.btn_stop.setEnabled(False)
         self.sim_btn.setEnabled(True)
         self.cont_mode_check.setEnabled(True)
+        self.pha_max_spin.setEnabled(True) # Desbloquear el rango
         logging.info("Acquisition stopped.")
 
     @pyqtSlot()
@@ -193,15 +207,22 @@ class MainWindow(QMainWindow):
                 self.handle_pulse(pulse)
 
     def handle_pulse(self, pulse):
-        # 1. PLOT WAVEFORM ALWAYS
-        x_axis = np.arange(len(pulse.raw_data))
-        self.wave_curve.setData(x_axis, pulse.raw_data)
+        n = len(pulse.raw_data)
+        if n == 0: return
+
+        # 1. CREATE CENTERED TIME AXIS (In microseconds)
+        fs = self.sample_rate # 100 MHz
+        total_time_us = (n / fs) * 1e6
+        time_axis = np.linspace(-total_time_us/2, total_time_us/2, n)
+
+        # PLOT WAVEFORM
+        self.wave_curve.setData(time_axis, pulse.raw_data)
 
         # Auto-center Y if in Continuous Mode
         if self.cont_mode_check.isChecked():
             self.wave_plot.enableAutoRange(axis='y')
 
-        # 2. UPDATE PHA (Only pulses > 50mV)
+        # 2. UPDATE PHA (Only real pulses greater than 50mV)
         if pulse.amplitude > 0.05:
             self.pha_builder.add_pulse(pulse.amplitude)
             self.view_model.process_new_pulse(pulse)
@@ -223,6 +244,20 @@ class MainWindow(QMainWindow):
         self.view_model.reset()
         self.pha_curve.setData([], [])
         self.wave_curve.setData([], [])
+        
+    @pyqtSlot(float)
+    def update_pha_range(self, new_max: float):
+        """Ejecutado al cambiar la Amplitud Máxima del PHA."""
+        self.pha_builder.set_max_amplitude(new_max)
+        
+        self.pulses_history.clear()
+        self.view_model.reset()
+        
+        edges, counts = self.pha_builder.get_histogram_data()
+        self.pha_curve.setData(edges, counts)
+        self.pha_plot.setXRange(0, new_max)
+        
+        logging.info(f"PHA Range set to: {new_max} V. Spectrum cleared.")
 
     @pyqtSlot()
     def save_data(self):

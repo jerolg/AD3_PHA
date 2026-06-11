@@ -4,13 +4,17 @@ from typing import Tuple
 class PHABuilder:
     """Aggregates pulse amplitudes into an energy spectrum histogram."""
 
-    def __init__(self, channels: int = 1024, max_val: float = 1.2):
+    def __init__(self, channels: int = 1024, max_val: float = 5.0):
         self.channels = channels
         self.max_val = max_val
-        # Bins array is length (channels + 1)
         self.bins = np.linspace(0, max_val, channels + 1)
-        # Counts array is length (channels)
         self.counts = np.zeros(channels, dtype=np.uint64)
+
+    def set_max_amplitude(self, new_max: float) -> None:
+        """Actualiza el rango máximo y recalcula los canales."""
+        self.max_val = new_max
+        self.bins = np.linspace(0, new_max, self.channels + 1)
+        self.reset() # Borrar conteos porque la escala cambió
 
     def add_pulse(self, amplitude: float) -> None:
         """Adds a single amplitude to the correct histogram bin."""

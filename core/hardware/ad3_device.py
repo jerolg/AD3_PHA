@@ -37,27 +37,36 @@ class AD3Device(IDevice):
         self._dwf.FDwfAnalogInChannelEnableSet(h, channel, ctypes.c_int(1))
         self._dwf.FDwfAnalogInChannelRangeSet(h, channel, ctypes.c_double(5.0))
         
-        # 2. Configurar Trigger
+        # ---> EL ERROR ESTABA AQUÍ: El modo Single en C++ es 0, no 1 <---
+        self._dwf.FDwfAnalogInAcquisitionModeSet(h, ctypes.c_int(0))
+        
+        # 2. Centrar el pulso y esperar infinito
+        self._dwf.FDwfAnalogInTriggerPositionSet(h, ctypes.c_double(0.0))
+        self._dwf.FDwfAnalogInTriggerAutoTimeoutSet(h, ctypes.c_double(0.0))
+        
+        # 3. Activar Condiciones del Trigger
         if config.trigger_enabled:
-            self._dwf.FDwfAnalogInTriggerSourceSet(h, ctypes.c_int(3)) # AnalogIn
+            self._dwf.FDwfAnalogInTriggerSourceSet(h, ctypes.c_int(2)) # 2 = AnalogIn
+            
+            # ---> FALTA ESTO PARA QUE EL TRIGGER NO SE DISPARE CON RUIDO <---
+            self._dwf.FDwfAnalogInTriggerTypeSet(h, ctypes.c_int(0)) # 0 = Edge (Cruce de línea)
+            
             self._dwf.FDwfAnalogInTriggerChannelSet(h, channel)
-            self._dwf.FDwfAnalogInTriggerConditionSet(h, ctypes.c_int(1)) # Falling
+            self._dwf.FDwfAnalogInTriggerConditionSet(h, ctypes.c_int(1)) # 1 = Falling Edge
             self._dwf.FDwfAnalogInTriggerLevelSet(h, ctypes.c_double(config.trigger_threshold))
         else:
             self._dwf.FDwfAnalogInTriggerSourceSet(h, ctypes.c_int(0)) # None
 
-        # 3. Iniciar el Hardware Inmediatamente
+        # 4. Iniciar Hardware
         self._dwf.FDwfAnalogInConfigure(h, ctypes.c_int(1), ctypes.c_int(1))
-        self._logger.info(f"AD3 Configurado y Corriendo (CH{config.channel+1})")
+        self._logger.info(f"AD3 Configurado. Threshold: {config.trigger_threshold}V")
 
     def poll_data(self) -> np.ndarray:
-        """Función rápida no bloqueante. Retorna datos solo si ya terminó."""
         if self._hdwf.value == 0: return np.array([])
         
         sts = ctypes.c_byte()
         self._dwf.FDwfAnalogInStatus(self._hdwf, ctypes.c_int(1), ctypes.byref(sts))
         
-        # Si terminó la captura (Estado 2)
         if sts.value == 2:
             # Extraer datos
             samples = (ctypes.c_double * self._config.buffer_size)()
@@ -68,16 +77,15 @@ class AD3Device(IDevice):
                 ctypes.c_int(self._config.buffer_size)
             )
             
-            # Pedir Inmediatamente la siguiente captura para no perder tiempo
-            self._dwf.FDwfAnalogInConfigure(self._hdwf, ctypes.c_int(1), ctypes.c_int(1))
+            # Re-armar el trigger SIN borrar la configuración (0, 1 en vez de 1, 1)
+            self._dwf.FDwfAnalogInConfigure(self._hdwf, ctypes.c_int(0), ctypes.c_int(1))
             
             return np.array(samples, dtype=np.float64)
             
-        return np.array([]) # Si no ha terminado, retorna vacío al instante
+        return np.array([])
 
     def is_connected(self) -> bool:
         return self._hdwf.value != 0
     
-    # Mantenemos este método por compatibilidad con la Interfaz abstracta
     def acquire_frame(self) -> np.ndarray:
         return self.poll_data()
