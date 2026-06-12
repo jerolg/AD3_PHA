@@ -128,8 +128,13 @@ class MainWindow(QMainWindow):
         # PHA HISTOGRAM
         self.pha_plot = pg.PlotWidget(title="PHA Spectrum")
         self.pha_plot.setLabel('left', 'Counts')
-        self.pha_plot.setLabel('bottom', 'Amplitude', 'V')
+        
+        # ---> CAMBIO AQUÍ: Ahora dice Channel <---
+        self.pha_plot.setLabel('bottom', 'Channel') 
+        
         self.pha_curve = self.pha_plot.plot(stepMode=True, fillLevel=0, fillOutline=True, brush=(52, 152, 219, 150))
+        # Fijar el rango visual X de 0 a 1024 desde el principio
+        self.pha_plot.setXRange(0, self.pha_builder.channels) 
         display_layout.addWidget(self.pha_plot, 2)
 
         # LOGS
@@ -247,7 +252,7 @@ class MainWindow(QMainWindow):
         
     @pyqtSlot(float)
     def update_pha_range(self, new_max: float):
-        """Ejecutado al cambiar la Amplitud Máxima del PHA."""
+        """Se ejecuta cuando el usuario cambia el valor de Amplitud Máxima."""
         self.pha_builder.set_max_amplitude(new_max)
         
         self.pulses_history.clear()
@@ -255,7 +260,9 @@ class MainWindow(QMainWindow):
         
         edges, counts = self.pha_builder.get_histogram_data()
         self.pha_curve.setData(edges, counts)
-        self.pha_plot.setXRange(0, new_max)
+        
+        # ---> CAMBIO AQUÍ: Mantiene la vista del eje X anclada a los canales (ej. 1024) <---
+        self.pha_plot.setXRange(0, self.pha_builder.channels)
         
         logging.info(f"PHA Range set to: {new_max} V. Spectrum cleared.")
 

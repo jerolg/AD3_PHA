@@ -7,14 +7,18 @@ class PHABuilder:
     def __init__(self, channels: int = 1024, max_val: float = 5.0):
         self.channels = channels
         self.max_val = max_val
+        # self.bins se sigue usando internamente para calcular en qué canal cae el voltaje
         self.bins = np.linspace(0, max_val, channels + 1)
         self.counts = np.zeros(channels, dtype=np.uint64)
+        
+        # NUEVO: Bordes de los canales para la gráfica (0, 1, 2... hasta 1024)
+        self.channel_edges = np.arange(channels + 1)
 
     def set_max_amplitude(self, new_max: float) -> None:
-        """Actualiza el rango máximo y recalcula los canales."""
+        """Actualiza el rango máximo y recalcula los bordes de voltaje interno."""
         self.max_val = new_max
         self.bins = np.linspace(0, new_max, self.channels + 1)
-        self.reset() # Borrar conteos porque la escala cambió
+        self.reset() 
 
     def add_pulse(self, amplitude: float) -> None:
         """Adds a single amplitude to the correct histogram bin."""
@@ -25,7 +29,8 @@ class PHABuilder:
 
     def get_histogram_data(self) -> Tuple[np.ndarray, np.ndarray]:
         """Returns (edges, counts) safely formatted for pyqtgraph StepMode."""
-        return self.bins, self.counts
+        # AHORA RETORNAMOS LOS CANALES EN EL EJE X, NO LOS VOLTIOS
+        return self.channel_edges, self.counts
 
     def reset(self) -> None:
         """Clears the histogram."""
