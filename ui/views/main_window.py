@@ -1,9 +1,10 @@
 import logging
 from PyQt6.QtWidgets import (QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, 
                              QPushButton, QComboBox, QLabel, QDoubleSpinBox, 
-                             QGroupBox, QFileDialog, QMessageBox, QTextEdit)
+                             QGroupBox, QFileDialog, QMessageBox, QTextEdit,
+                             QScrollArea)
 from PyQt6.QtCore import pyqtSlot, Qt, QTimer
-from PyQt6.QtGui import QTextCursor
+from PyQt6.QtGui import QTextCursor, QPixmap
 import pyqtgraph as pg
 import numpy as np
 
@@ -20,11 +21,11 @@ class MainWindow(QMainWindow):
         super().__init__()
         self.setWindowTitle("Nuclear PHA - Analog Discovery 3")
         self.resize(1300, 900)
+        self.setMinimumSize(900, 600) 
 
         self.qt_log_handler = qt_log_handler
         self.device = None
         
-        # --- TIMER ---
         self.timer = QTimer()
         self.timer.timeout.connect(self.poll_hardware)
         
@@ -37,15 +38,32 @@ class MainWindow(QMainWindow):
         self._connect_signals()
         
         self.qt_log_handler.message_logged.connect(self.append_log)
-        logging.info("Application started. Worker removed, using QTimer.")
+        logging.info("Application started. Ready.")
 
     def _init_ui(self):
         central_widget = QWidget()
         self.setCentralWidget(central_widget)
         main_layout = QHBoxLayout(central_widget)
 
-        ctrl_layout = QVBoxLayout()
-        main_layout.addLayout(ctrl_layout, 1)
+        # --- CONTENEDOR SCROLL PARA EL PANEL IZQUIERDO ---
+        scroll_area = QScrollArea()
+        scroll_area.setWidgetResizable(True)
+        scroll_area.setFrameShape(QScrollArea.Shape.NoFrame)
+        
+        left_panel_widget = QWidget()
+        ctrl_layout = QVBoxLayout(left_panel_widget)
+        
+        scroll_area.setWidget(left_panel_widget)
+        main_layout.addWidget(scroll_area, 1)
+
+        # ==========================================
+        # FLAG / BADGE INDICADOR DE ESTADO
+        # ==========================================
+        self.lbl_status = QLabel()
+        self.lbl_status.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.set_status_idle() # Llama al estado "Ready for Measuring"
+        ctrl_layout.addWidget(self.lbl_status)
+        # ==========================================
 
         cfg_group = QGroupBox("Hardware Configuration")
         cfg_form = QVBoxLayout()
@@ -55,16 +73,16 @@ class MainWindow(QMainWindow):
         cfg_form.addWidget(QLabel("Channel:"))
         cfg_form.addWidget(self.chan_combo)
 
-        # 1. TRIGGER THRESHOLD (Corregido, solo aparece una vez)
+        # TRIGGER THRESHOLD 
         self.thresh_spin = QDoubleSpinBox()
-        self.thresh_spin.setRange(-5.0, 5.0) # Mejor poner rango negativo por si la base baja
+        self.thresh_spin.setRange(-5.0, 5.0) 
         self.thresh_spin.setValue(0.8)
         self.thresh_spin.setSingleStep(0.05)
         self.thresh_spin.setSuffix(" V")
         cfg_form.addWidget(QLabel("Trigger Threshold (Falling):"))
         cfg_form.addWidget(self.thresh_spin)
 
-        # 2. CONTROL DE AMPLITUD MÁXIMA PHA
+        # CONTROL DE AMPLITUD MÁXIMA PHA
         self.pha_max_spin = QDoubleSpinBox()
         self.pha_max_spin.setRange(0.5, 10.0) 
         self.pha_max_spin.setValue(5.0)       
@@ -73,13 +91,23 @@ class MainWindow(QMainWindow):
         cfg_form.addWidget(QLabel("PHA Max Amplitude:"))
         cfg_form.addWidget(self.pha_max_spin)
 
-        # 3. BOTONES DE MODO
+        # BOTONES DE MODO (Con el color #27ae60 cuando están activos)
+        check_btn_style = """
+            QPushButton:checked {
+                background-color: #27ae60;
+                color: white;
+                font-weight: bold;
+            }
+        """
+
         self.sim_btn = QPushButton("Use Simulated Hardware")
         self.sim_btn.setCheckable(True)
+        self.sim_btn.setStyleSheet(check_btn_style)
         cfg_form.addWidget(self.sim_btn)
 
         self.cont_mode_check = QPushButton("Continuous Mode (No Trigger)")
         self.cont_mode_check.setCheckable(True)
+        self.cont_mode_check.setStyleSheet(check_btn_style)
         cfg_form.addWidget(self.cont_mode_check)
         
         cfg_group.setLayout(cfg_form)
@@ -112,7 +140,40 @@ class MainWindow(QMainWindow):
         ctrl_layout.addWidget(self.btn_stop)
         ctrl_layout.addWidget(self.btn_reset)
         ctrl_layout.addWidget(self.btn_save)
+        
         ctrl_layout.addStretch()
+
+        # ==========================================
+        # BRANDING: GICM - Universidad de Antioquia
+        # ==========================================
+        branding_layout = QVBoxLayout()
+        
+        self.logo_label = QLabel()
+        pixmap = QPixmap("assets/logo_gicm.png") 
+        
+        if not pixmap.isNull():
+            pixmap = pixmap.scaled(180, 150, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation)
+            self.logo_label.setPixmap(pixmap)
+        else:
+            self.logo_label.setText("[Logo GICM No Encontrado]")
+            
+        self.logo_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        
+        creditos_html = (
+            "<div style='text-align: center; font-size: 12px; color: #555; margin-top: 10px;'>"
+            "<b>Scientific Instrumentation and Microelectronics Group (GICM)</b><br>"
+            "Universidad de Antioquia<br><br>"
+            "<i>Developed by: Jerónimo López</i>"
+            "</div>"
+        )
+        self.lbl_credits = QLabel(creditos_html)
+        self.lbl_credits.setWordWrap(True)
+        self.lbl_credits.setAlignment(Qt.AlignmentFlag.AlignCenter)
+
+        branding_layout.addWidget(self.logo_label)
+        branding_layout.addWidget(self.lbl_credits)
+        ctrl_layout.addLayout(branding_layout)
+        # ==========================================
 
         display_layout = QVBoxLayout()
         main_layout.addLayout(display_layout, 4)
@@ -128,13 +189,12 @@ class MainWindow(QMainWindow):
         # PHA HISTOGRAM
         self.pha_plot = pg.PlotWidget(title="PHA Spectrum")
         self.pha_plot.setLabel('left', 'Counts')
-        
-        # ---> CAMBIO AQUÍ: Ahora dice Channel <---
         self.pha_plot.setLabel('bottom', 'Channel') 
-        
         self.pha_curve = self.pha_plot.plot(stepMode=True, fillLevel=0, fillOutline=True, brush=(52, 152, 219, 150))
-        # Fijar el rango visual X de 0 a 1024 desde el principio
-        self.pha_plot.setXRange(0, self.pha_builder.channels) 
+        
+        self.pha_plot.setXRange(0, self.pha_builder.channels, padding=0)
+        self.pha_plot.setMouseEnabled(x=False, y=True)
+        
         display_layout.addWidget(self.pha_plot, 2)
 
         # LOGS
@@ -143,6 +203,23 @@ class MainWindow(QMainWindow):
         self.log_viewer.setMaximumHeight(130)
         self.log_viewer.setStyleSheet("background-color: #1e1e1e; color: #d4d4d4; font-family: Consolas;")
         display_layout.addWidget(self.log_viewer, 1)
+
+    # ==========================================
+    # MÉTODOS DE LA FLAG/BADGE
+    # ==========================================
+    def set_status_idle(self):
+        self.lbl_status.setText("Ready for Measuring")
+        self.lbl_status.setStyleSheet("""
+            background-color:  #27ae60; color: white; font-weight: bold; 
+            font-size: 14px; padding: 8px; border-radius: 5px;
+        """)
+
+    def set_status_measuring(self):
+        self.lbl_status.setText("Measuring in Progress")
+        self.lbl_status.setStyleSheet("""
+            background-color: #c0392b; color: white; font-weight: bold; 
+            font-size: 14px; padding: 8px; border-radius: 5px;
+        """)
 
     def _connect_signals(self):
         self.btn_start.clicked.connect(self.start_acquisition)
@@ -170,10 +247,7 @@ class MainWindow(QMainWindow):
         )
         self.sample_rate = config.sample_rate
         
-        # Configure Hardware
         self.device.configure(config)
-        
-        # Start QTimer (Poll every 20 ms)
         self.timer.start(20)
         self.view_model.reset()
         
@@ -181,11 +255,14 @@ class MainWindow(QMainWindow):
         self.btn_stop.setEnabled(True)
         self.sim_btn.setEnabled(False)
         self.cont_mode_check.setEnabled(False)
-        self.pha_max_spin.setEnabled(False) # Bloquear cambiar el rango mientras corre
+        self.pha_max_spin.setEnabled(False)
+        
+        # Cambiar el flag a modo medición
+        self.set_status_measuring()
 
     @pyqtSlot()
     def stop_acquisition(self):
-        self.timer.stop() # Stop polling
+        self.timer.stop() 
         
         if self.device:
             self.device.disconnect()
@@ -194,19 +271,19 @@ class MainWindow(QMainWindow):
         self.btn_stop.setEnabled(False)
         self.sim_btn.setEnabled(True)
         self.cont_mode_check.setEnabled(True)
-        self.pha_max_spin.setEnabled(True) # Desbloquear el rango
+        self.pha_max_spin.setEnabled(True)
+        
+        # Volver el flag a estado inicial
+        self.set_status_idle()
         logging.info("Acquisition stopped.")
 
     @pyqtSlot()
     def poll_hardware(self):
-        """Called by QTimer every 20ms to check for data."""
         if not self.device: return
         
-        # poll_data() returns [] if the card is still waiting for a pulse
         raw_data = self.device.poll_data()
         
         if raw_data.size > 0:
-            # Process the signal
             pulse = DSPEngine.process_buffer(raw_data, self.sample_rate)
             if pulse:
                 self.handle_pulse(pulse)
@@ -215,19 +292,17 @@ class MainWindow(QMainWindow):
         n = len(pulse.raw_data)
         if n == 0: return
 
-        # 1. CREATE CENTERED TIME AXIS (In microseconds)
-        fs = self.sample_rate # 100 MHz
+        # 1. GRAPH WAVEFORM IN MICROSECONDS
+        fs = self.sample_rate
         total_time_us = (n / fs) * 1e6
         time_axis = np.linspace(-total_time_us/2, total_time_us/2, n)
 
-        # PLOT WAVEFORM
         self.wave_curve.setData(time_axis, pulse.raw_data)
 
-        # Auto-center Y if in Continuous Mode
         if self.cont_mode_check.isChecked():
             self.wave_plot.enableAutoRange(axis='y')
 
-        # 2. UPDATE PHA (Only real pulses greater than 50mV)
+        # 2. UPDATE PHA 
         if pulse.amplitude > 0.05:
             self.pha_builder.add_pulse(pulse.amplitude)
             self.view_model.process_new_pulse(pulse)
@@ -252,18 +327,13 @@ class MainWindow(QMainWindow):
         
     @pyqtSlot(float)
     def update_pha_range(self, new_max: float):
-        """Se ejecuta cuando el usuario cambia el valor de Amplitud Máxima."""
         self.pha_builder.set_max_amplitude(new_max)
-        
         self.pulses_history.clear()
         self.view_model.reset()
         
         edges, counts = self.pha_builder.get_histogram_data()
         self.pha_curve.setData(edges, counts)
-        
-        # ---> CAMBIO AQUÍ: Mantiene la vista del eje X anclada a los canales (ej. 1024) <---
-        self.pha_plot.setXRange(0, self.pha_builder.channels)
-        
+        self.pha_plot.setXRange(0, self.pha_builder.channels, padding=0)
         logging.info(f"PHA Range set to: {new_max} V. Spectrum cleared.")
 
     @pyqtSlot()
