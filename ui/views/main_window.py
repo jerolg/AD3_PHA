@@ -119,7 +119,7 @@ class MainWindow(QMainWindow):
         self.lbl_cps = QLabel("Rate: 0.00 CPS")
         self.lbl_time = QLabel("Time: 0.0 s")
         for lbl in (self.lbl_counts, self.lbl_cps, self.lbl_time):
-            lbl.setStyleSheet("font-weight: bold; font-size: 14px; color: #2c3e50;")
+            lbl.setStyleSheet("font-weight: bold; font-size: 14px; color: #85A8D0;")
             stats_layout.addWidget(lbl)
         stats_group.setLayout(stats_layout)
         ctrl_layout.addWidget(stats_group)
